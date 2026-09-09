@@ -258,7 +258,7 @@
         </div>
         <div class="mission-main">
           <div class="mission-copy">
-            <span class="eyebrow">${day.name} · ${day.title}</span>
+            <span class="eyebrow">${day.name} · ${day.headerTitle || day.title}</span>
             <h1>${day.promise}</h1>
             <p>${data.subtitle}</p>
           </div>
@@ -310,7 +310,7 @@
       </section>
 
       <section class="day-section details-section" aria-labelledby="details-title">
-        <div class="day-section__heading">${icon("book")}<div><span class="eyebrow">Второй уровень</span><h2 id="details-title">Как сделать</h2><p>${data.help}</p></div></div>
+        <div class="day-section__heading">${icon("book")}<div><h2 id="details-title">Примеры и шаблоны</h2><p>${data.help}</p></div></div>
         <div class="accordions">${data.details.map(detailMarkup).join("")}${detailMarkup(window.GENERAL_HELP)}${detailMarkup({ title: "Коротко о терминах", groups: window.TERM_DEFINITIONS })}</div>
       </section>
 
