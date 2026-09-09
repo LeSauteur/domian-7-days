@@ -733,7 +733,8 @@ body {
   .brand small { color: #a4bfcc; font-size: .62rem; }
   .mission-meta { color: #aec8d5; font-size: .72rem; }
   .mission-status { font-size: .63rem; }
-  .mission-copy .eyebrow { font-size: .68rem; }
+  .mission-copy .eyebrow { font-size: 14px; }
+  .mission-copy > p { max-height: none; overflow: visible; font-size: 16px; line-height: 1.4; }
   .mission-progress > div:first-child span { color: #a9c2cf; font-size: .72rem; }
   .mission-progress small { color: #9fb9c6; font-size: .66rem; }
   .week-calendar__heading .eyebrow { font-size: .62rem; }
