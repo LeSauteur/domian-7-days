@@ -8,7 +8,9 @@
   "use strict";
 
   const TIME_ZONE = "Europe/Moscow";
-  const STORAGE_KEY = "domian:calendar:v2";
+  const STORAGE_KEY = "domian:calendar:v3";
+  const LEGACY_STORAGE_KEY = "domian:calendar:v2";
+  const LEGACY_CONTENT_VERSION = "legacy-v2";
   const DAY_IDS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
 
   function isoFromParts(year, month, day) {
@@ -62,7 +64,7 @@
     const weekStart = weekStartFor(todayIso);
     const firstFullWeekStart = weekdayIndex(todayIso) === 0 ? weekStart : addDays(weekStart, 7);
     return {
-      version: 2,
+      version: 3,
       participationStart: todayIso,
       firstFullWeekStart,
       days: {},
@@ -70,7 +72,7 @@
   }
 
   function normalizeState(value, todayIso) {
-    if (!value || value.version !== 2 || typeof value.days !== "object") return initialState(todayIso);
+    if (!value || value.version !== 3 || typeof value.days !== "object") return initialState(todayIso);
     const participationStart = /^\d{4}-\d{2}-\d{2}$/.test(value.participationStart || "")
       ? value.participationStart
       : todayIso;
@@ -84,10 +86,13 @@
       Object.entries(record.tasks).forEach(([key, done]) => {
         if (done === true) tasks[key] = true;
       });
-      normalizedDays[date] = { tasks };
+      normalizedDays[date] = {
+        contentVersion: typeof record.contentVersion === "string" ? record.contentVersion : LEGACY_CONTENT_VERSION,
+        tasks,
+      };
     });
     return {
-      version: 2,
+      version: 3,
       participationStart,
       firstFullWeekStart: /^\d{4}-\d{2}-\d{2}$/.test(value.firstFullWeekStart || "")
         ? value.firstFullWeekStart
@@ -96,61 +101,113 @@
     };
   }
 
-  function taskKey(dayId, index) {
-    return `${dayId}:${index}`;
+  function migrateLegacyState(value, todayIso) {
+    if (!value || value.version !== 2 || typeof value.days !== "object") return initialState(todayIso);
+    const migrated = initialState(todayIso);
+    migrated.participationStart = /^\d{4}-\d{2}-\d{2}$/.test(value.participationStart || "")
+      ? value.participationStart
+      : todayIso;
+    migrated.firstFullWeekStart = /^\d{4}-\d{2}-\d{2}$/.test(value.firstFullWeekStart || "")
+      ? value.firstFullWeekStart
+      : (weekdayIndex(migrated.participationStart) === 0
+        ? weekStartFor(migrated.participationStart)
+        : addDays(weekStartFor(migrated.participationStart), 7));
+    Object.entries(value.days).forEach(([date, record]) => {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !record || typeof record.tasks !== "object") return;
+      const tasks = {};
+      Object.entries(record.tasks).forEach(([key, done]) => {
+        if (done === true) tasks[key] = true;
+      });
+      migrated.days[date] = { contentVersion: LEGACY_CONTENT_VERSION, tasks };
+    });
+    return migrated;
   }
 
-  function checkedIndexes(state, isoDate, dayId, total) {
-    const tasks = state.days?.[isoDate]?.tasks || {};
-    return Array.from({ length: total }, (_, index) => index).filter((index) => tasks[taskKey(dayId, index)] === true);
+  function hydrateState(currentValue, legacyValue, todayIso) {
+    if (currentValue?.version === 3) return normalizeState(currentValue, todayIso);
+    if (legacyValue?.version === 2) return migrateLegacyState(legacyValue, todayIso);
+    return initialState(todayIso);
   }
 
-  function setTask(state, isoDate, dayId, index, done) {
+  function contentVersionForDate(state, isoDate, currentContentVersion) {
+    return state.days?.[isoDate]?.contentVersion || currentContentVersion;
+  }
+
+  function taskKey(dayId, taskId, contentVersion) {
+    return contentVersion === LEGACY_CONTENT_VERSION
+      ? `${dayId}:${taskId}`
+      : `${dayId}:${contentVersion}:${taskId}`;
+  }
+
+  function taskIdAt(task, index, contentVersion) {
+    return contentVersion === LEGACY_CONTENT_VERSION ? String(index) : String(task.id);
+  }
+
+  function checkedTaskIds(state, isoDate, dayId, taskList, contentVersion) {
+    const stored = state.days?.[isoDate]?.tasks || {};
+    return taskList
+      .map((task, index) => taskIdAt(task, index, contentVersion))
+      .filter((taskId) => stored[taskKey(dayId, taskId, contentVersion)] === true);
+  }
+
+  function setTask(state, isoDate, dayId, taskId, done, contentVersion) {
     const next = normalizeState(state, isoDate);
-    const record = next.days[isoDate] || { tasks: {} };
+    const record = next.days[isoDate] || { contentVersion, tasks: {} };
     const tasks = { ...record.tasks };
-    if (done) tasks[taskKey(dayId, index)] = true;
-    else delete tasks[taskKey(dayId, index)];
-    next.days = { ...next.days, [isoDate]: { tasks } };
+    const revision = record.contentVersion || contentVersion;
+    const key = taskKey(dayId, taskId, revision);
+    if (done) tasks[key] = true;
+    else delete tasks[key];
+    next.days = { ...next.days, [isoDate]: { contentVersion: revision, tasks } };
     return next;
   }
 
-  function resetDay(state, isoDate, dayId) {
+  function resetDay(state, isoDate, dayId, contentVersion) {
     const next = normalizeState(state, isoDate);
-    const record = next.days[isoDate] || { tasks: {} };
-    const prefix = `${dayId}:`;
+    const record = next.days[isoDate] || { contentVersion, tasks: {} };
+    const revision = record.contentVersion || contentVersion;
+    const prefix = revision === LEGACY_CONTENT_VERSION ? `${dayId}:` : `${dayId}:${revision}:`;
     const tasks = Object.fromEntries(Object.entries(record.tasks).filter(([key]) => !key.startsWith(prefix)));
-    next.days = { ...next.days, [isoDate]: { tasks } };
+    next.days = { ...next.days, [isoDate]: { contentVersion: revision, tasks } };
     return next;
   }
 
-  function progressFor(state, isoDate, dayId, total) {
-    const done = checkedIndexes(state, isoDate, dayId, total).length;
+  function progressFor(state, isoDate, dayId, taskList, contentVersion) {
+    const total = taskList.length;
+    const done = checkedTaskIds(state, isoDate, dayId, taskList, contentVersion).length;
     return { done, total, percent: total ? Math.round((done / total) * 100) : 0 };
   }
 
-  function statusForDate({ state, isoDate, todayIso, dayId, total }) {
-    const progress = progressFor(state, isoDate, dayId, total);
+  function statusForDate({ state, isoDate, todayIso, dayId, taskList, contentVersion }) {
+    const progress = progressFor(state, isoDate, dayId, taskList, contentVersion);
     if (isoDate < state.participationStart) return { id: "before-participation", label: "До начала участия", ...progress };
     if (isoDate > todayIso) return { id: "upcoming", label: "Предстоит", ...progress };
     if (isoDate < todayIso) {
-      return progress.done === total
+      return progress.done === progress.total
         ? { id: "completed", label: "Выполнено", ...progress }
         : { id: "incomplete", label: "Не завершено", ...progress };
     }
-    if (progress.done === total) return { id: "completed", label: "Выполнено", ...progress };
+    if (progress.done === progress.total) return { id: "completed", label: "Выполнено", ...progress };
     if (progress.done > 0) return { id: "in-progress", label: "В работе", ...progress };
     return { id: "not-started", label: "Не начато", ...progress };
   }
 
-  function weekSnapshot({ state, weekStart, todayIso, days, content }) {
+  function tasksForDate(state, isoDate, dayId, content, currentContentVersion) {
+    const version = contentVersionForDate(state, isoDate, currentContentVersion);
+    const taskList = version === LEGACY_CONTENT_VERSION
+      ? content[dayId].legacyChecklist
+      : content[dayId].checklist;
+    return { version, taskList };
+  }
+
+  function weekSnapshot({ state, weekStart, todayIso, days, content, currentContentVersion }) {
     const entries = days.map((day, index) => {
       const isoDate = dateForDay(weekStart, index);
-      const total = content[day.id].checklist.length;
+      const { version, taskList } = tasksForDate(state, isoDate, day.id, content, currentContentVersion);
       return {
         day,
         isoDate,
-        status: statusForDate({ state, isoDate, todayIso, dayId: day.id, total }),
+        status: statusForDate({ state, isoDate, todayIso, dayId: day.id, taskList, contentVersion: version }),
       };
     });
     const completed = entries.filter((entry) => entry.status.id === "completed").length;
@@ -168,11 +225,15 @@
   return {
     TIME_ZONE,
     STORAGE_KEY,
+    LEGACY_STORAGE_KEY,
+    LEGACY_CONTENT_VERSION,
     DAY_IDS,
     addDays,
-    checkedIndexes,
+    checkedTaskIds,
+    contentVersionForDate,
     dateForDay,
     datePartsInMoscow,
+    hydrateState,
     initialState,
     normalizeState,
     progressFor,
@@ -180,6 +241,7 @@
     setTask,
     statusForDate,
     taskKey,
+    tasksForDate,
     weekdayIndex,
     weekSnapshot,
     weekStartFor,

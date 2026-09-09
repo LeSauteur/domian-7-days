@@ -47,12 +47,15 @@
 
   function readCalendarState(todayIso) {
     let parsed;
+    let legacy;
     try {
       parsed = JSON.parse(localStorage.getItem(calendar.STORAGE_KEY));
+      legacy = JSON.parse(localStorage.getItem(calendar.LEGACY_STORAGE_KEY));
     } catch (_) {
       parsed = null;
+      legacy = null;
     }
-    const normalized = calendar.normalizeState(parsed, todayIso);
+    const normalized = calendar.hydrateState(parsed, legacy, todayIso);
     try {
       localStorage.setItem(calendar.STORAGE_KEY, JSON.stringify(normalized));
     } catch (_) {
@@ -147,7 +150,11 @@
     const groups = item.groups
       ? `<div class="detail-groups">${item.groups.map(([title, text]) => `<div><strong>${title}</strong><p>${text}</p></div>`).join("")}</div>`
       : "";
-    return `<details class="accordion"><summary><span>${item.title}</span><i aria-hidden="true"></i></summary><div class="accordion__body">${item.lead ? `<p>${item.lead}</p>` : ""}${items}${groups}</div></details>`;
+    const template = item.template
+      ? `<div class="work-template"><pre>${item.template}</pre><button class="template-copy" type="button" data-copy-template="${activeContext.templates.push(item.template) - 1}">${icon("copy")}<span>Скопировать шаблон</span></button></div>`
+      : "";
+    const source = item.source ? `<p class="detail-source">${item.source}</p>` : "";
+    return `<details class="accordion"><summary><span>${item.title}</span><i aria-hidden="true"></i></summary><div class="accordion__body">${item.lead ? `<p>${item.lead}</p>` : ""}${items}${groups}${template}${source}</div></details>`;
   }
 
   function weekResultMarkup(snapshot) {
@@ -189,27 +196,78 @@
     const day = window.WEEK_DAYS[dayIndex];
     const data = window.DAY_CONTENT[dayId];
     const selectedDate = calendar.dateForDay(today.weekStart, dayIndex);
+    const { version: contentVersion, taskList } = calendar.tasksForDate(
+      calendarState,
+      selectedDate,
+      dayId,
+      window.DAY_CONTENT,
+      window.CONTENT_VERSION,
+    );
     const status = calendar.statusForDate({
       state: calendarState,
       isoDate: selectedDate,
       todayIso: today.isoDate,
       dayId,
-      total: data.checklist.length,
+      taskList,
+      contentVersion,
     });
-    const snapshot = calendar.weekSnapshot({ state: calendarState, weekStart: today.weekStart, todayIso: today.isoDate, days: window.WEEK_DAYS, content: window.DAY_CONTENT });
-    return { today, dayIndex, day, data, selectedDate, status, snapshot, editable: selectedDate === today.isoDate };
+    const snapshot = calendar.weekSnapshot({
+      state: calendarState,
+      weekStart: today.weekStart,
+      todayIso: today.isoDate,
+      days: window.WEEK_DAYS,
+      content: window.DAY_CONTENT,
+      currentContentVersion: window.CONTENT_VERSION,
+    });
+    return {
+      today,
+      dayIndex,
+      day,
+      data,
+      selectedDate,
+      status,
+      snapshot,
+      taskList,
+      contentVersion,
+      isLegacyContent: contentVersion === calendar.LEGACY_CONTENT_VERSION,
+      editable: selectedDate === today.isoDate,
+      templates: [],
+    };
   }
 
   function renderDay(dayId) {
     activeContext = buildContext(dayId);
-    const { today, dayIndex, day, data, selectedDate, status, snapshot, editable } = activeContext;
-    const checked = calendar.checkedIndexes(calendarState, selectedDate, dayId, data.checklist.length);
+    const { today, dayIndex, day, data, selectedDate, status, snapshot, editable, taskList, contentVersion, isLegacyContent } = activeContext;
+    const checked = calendar.checkedTaskIds(calendarState, selectedDate, dayId, taskList, contentVersion);
     const previous = window.WEEK_DAYS[dayIndex - 1];
     const next = window.WEEK_DAYS[dayIndex + 1];
     const isToday = selectedDate === today.isoDate;
     const temporalLabel = isToday ? "Сегодня" : selectedDate < today.isoDate ? "Прошедший день" : "Предстоящий день";
     const backLink = isToday ? "" : '<a class="back-link back-link--compact" href="#home">← К сегодняшней миссии</a>';
-    const readOnlyNote = editable ? "" : `<div class="readonly-note">${icon("clock")}<span><strong>Режим просмотра.</strong> Отмечать задачи можно только в их календарный день.</span></div>`;
+    const readOnlyText = selectedDate < today.isoDate
+      ? "Этот день прошёл. Можно посмотреть задания и сохранённые отметки."
+      : "Задания можно посмотреть заранее. Отмечать выполнение — в этот день.";
+    const readOnlyNote = editable ? "" : `<div class="readonly-note">${icon("clock")}<span><strong>Режим просмотра.</strong> ${readOnlyText}</span></div>`;
+    const legacyNote = isLegacyContent
+      ? `<div class="revision-note">Показана прежняя редакция заданий для этой даты. Сохранённые отметки не перенесены на новые по смыслу действия.</div>`
+      : "";
+    const checklistMarkup = taskList.map((task, index) => {
+      const taskId = isLegacyContent ? String(index) : task.id;
+      const label = isLegacyContent ? task : task.label;
+      const helper = isLegacyContent ? "" : `<span class="check-item__helper">${task.helper}</span>`;
+      const doneWhen = isLegacyContent ? "" : `<details class="task-criterion"><summary>Когда отмечать?</summary><p>${task.doneWhen}</p></details>`;
+      const isDone = checked.includes(taskId);
+      return `
+        <article class="check-item ${isDone ? "is-done" : ""} ${editable ? "" : "is-readonly"}">
+          <label class="check-item__action">
+            <input type="checkbox" data-task-id="${taskId}" ${isDone ? "checked" : ""} ${editable ? "" : "disabled"} />
+            <span class="custom-check" aria-hidden="true"></span>
+            <span class="check-item__copy"><strong>${label}</strong>${helper}</span>
+            <small>${isDone ? "Выполнено" : ""}</small>
+          </label>
+          ${doneWhen}
+        </article>`;
+    }).join("");
 
     app.innerHTML = `
       <section class="mission-panel page-enter ${isToday ? "is-today" : "is-viewing"} ${status.id === "completed" ? "is-complete" : ""}">
@@ -235,23 +293,20 @@
       </section>
 
       <section class="day-section checklist-section ${status.id === "completed" ? "is-complete" : ""}" aria-labelledby="checklist-title">
-        <div class="day-section__heading checklist-heading">${icon("check")}<div><span class="eyebrow">Рабочие действия</span><h2 id="checklist-title">Что нужно сделать</h2></div></div>
+        <div class="day-section__heading checklist-heading">${icon("check")}<div><span class="eyebrow">Чек-лист руководителя</span><h2 id="checklist-title">Что проверить сегодня</h2><p>Отмечайте пункт, когда выполнено действие и проверен результат.</p></div></div>
         ${readOnlyNote}
-        <div class="checklist">${data.checklist.map((text, index) => `
-          <label class="check-item ${checked.includes(index) ? "is-done" : ""} ${editable ? "" : "is-readonly"}">
-            <input type="checkbox" data-check-index="${index}" ${checked.includes(index) ? "checked" : ""} ${editable ? "" : "disabled"} />
-            <span class="custom-check" aria-hidden="true"></span><span>${text}</span><small>${checked.includes(index) ? "Выполнено" : ""}</small>
-          </label>`).join("")}</div>
+        ${legacyNote}
+        <div class="checklist">${checklistMarkup}</div>
         <div id="result-note" class="result-note ${status.id === "completed" ? "is-achieved" : ""}"><span aria-hidden="true">${status.id === "completed" ? "✓" : "→"}</span><div><strong>${status.id === "completed" ? "Результат достигнут" : "Ожидаемый результат"}</strong><p>${data.result}</p></div></div>
         <div id="completion-panel" class="completion-panel" aria-live="polite" ${status.id === "completed" ? "" : "hidden"}>
           ${icon(day.icon)}
-          <div><span class="eyebrow">Миссия выполнена</span><h3>${data.title}: день завершён</h3><p>Все ${data.checklist.length} действий отмечены и сохранены за ${formatDate(selectedDate, false)}.</p></div>
+          <div><span class="eyebrow">Чек-лист дня завершён</span><h3>${data.title}: день завершён</h3><p>Ваши ${taskList.length} отметок за ${formatDate(selectedDate, false)} сохранены в этом браузере.</p></div>
           <button class="button button--primary" type="button" data-scroll-week>К результату недели <span aria-hidden="true">↓</span></button>
         </div>
         ${editable ? `
-          <button id="reset-progress" class="text-button" type="button">↻ Сбросить сегодняшний прогресс</button>
+          <button id="reset-progress" class="text-button" type="button">↻ Сбросить отметки за сегодня</button>
           <div id="reset-confirm" class="reset-confirm" hidden role="group" aria-label="Подтверждение сброса">
-            <span>Сбросить только сегодняшние отметки?</span>
+            <span>Снять все отметки за сегодня? Тексты заданий останутся.</span>
             <button id="confirm-reset" type="button">Да, сбросить</button><button id="cancel-reset" type="button">Отмена</button>
           </div>` : ""}
       </section>
@@ -259,9 +314,9 @@
       <div id="week-result-wrap">${weekResultMarkup(snapshot)}</div>
 
       <section class="day-section message-section" aria-labelledby="message-title">
-        <div class="day-section__heading">${icon("copy")}<div><span class="eyebrow">Готово к отправке</span><h2 id="message-title">Текст для чата офиса</h2><p>Кнопка только копирует текст — приложение ничего не отправляет.</p></div></div>
+        <div class="day-section__heading">${icon("copy")}<div><span class="eyebrow">Готово к отправке</span><h2 id="message-title">Сообщение агентам</h2><p>Кнопка только копирует сообщение — приложение ничего не отправляет.</p></div></div>
         <div id="office-message" class="message-box">${data.message.replaceAll("\n", "<br>")}</div>
-        <button id="copy-message" class="button button--primary button--wide" type="button">${icon("copy")} <span class="button-label">Скопировать текст</span></button>
+        <button id="copy-message" class="button button--primary button--wide" type="button">${icon("copy")} <span class="button-label">Скопировать сообщение</span></button>
       </section>
 
       <section class="day-section tips-section" aria-labelledby="tips-title">
@@ -272,11 +327,20 @@
       <section class="day-section overview" aria-labelledby="overview-title">
         <div class="day-section__heading">${icon("target")}<div><span class="eyebrow">Контекст</span><h2 id="overview-title">Что это за день</h2><p>${data.intro}</p></div></div>
         <div class="principles">${data.principles.map((principle) => `<article>${icon(principle.icon)}<h3>${principle.title}</h3><p>${principle.text}</p></article>`).join("")}</div>
+        <div class="scope-note"><strong>Объём работы</strong><p>${data.scope}</p></div>
       </section>
 
       <section class="day-section details-section" aria-labelledby="details-title">
-        <div class="day-section__heading">${icon("book")}<div><span class="eyebrow">Второй уровень</span><h2 id="details-title">Подробнее</h2><p>Практические рекомендации и формулировки из книги.</p></div></div>
-        <div class="accordions">${data.details.map(detailMarkup).join("")}</div>
+        <div class="day-section__heading">${icon("book")}<div><span class="eyebrow">Второй уровень</span><h2 id="details-title">Как сделать</h2><p>${data.help}</p></div></div>
+        <div class="accordions">${data.details.map(detailMarkup).join("")}${detailMarkup(window.GENERAL_HELP)}${detailMarkup({ title: "Коротко о терминах", groups: window.TERM_DEFINITIONS })}</div>
+      </section>
+
+      <section class="day-section book-section" aria-labelledby="book-title">
+        <div class="day-section__heading">${icon("book")}<div><span class="eyebrow">Первоисточник</span><h2 id="book-title">Книга 2.0</h2><p>Подробнее в книге: ${data.source}. Номер страницы указан и в подписи, если просмотрщик не поддерживает прямой переход.</p></div></div>
+        <div class="book-actions">
+          <a class="button button--primary" href="${window.BOOK_INFO.href}#page=${data.bookPage}" target="_blank" rel="noopener">Открыть со страницы ${data.bookPage}</a>
+          <a class="button button--secondary" href="${window.BOOK_INFO.href}" target="_blank" rel="noopener">Открыть всю книгу · версия 2.0</a>
+        </div>
       </section>
 
       <nav class="day-navigation" aria-label="Навигация по дням">
@@ -288,8 +352,9 @@
   }
 
   function bindDayEvents() {
-    document.querySelectorAll("[data-check-index]:not(:disabled)").forEach((input) => input.addEventListener("change", handleCheck));
+    document.querySelectorAll("[data-task-id]:not(:disabled)").forEach((input) => input.addEventListener("change", handleCheck));
     document.querySelector("#copy-message")?.addEventListener("click", copyMessage);
+    document.querySelectorAll("[data-copy-template]").forEach((button) => button.addEventListener("click", copyTemplate));
     document.querySelector("#reset-progress")?.addEventListener("click", openResetConfirmation);
     document.querySelector("#confirm-reset")?.addEventListener("click", confirmReset);
     document.querySelector("#cancel-reset")?.addEventListener("click", cancelReset);
@@ -297,9 +362,9 @@
   }
 
   function updateLiveUi(announceCompletion) {
-    const { day, data, selectedDate, today } = activeContext;
-    const status = calendar.statusForDate({ state: calendarState, isoDate: selectedDate, todayIso: today.isoDate, dayId: day.id, total: data.checklist.length });
-    const snapshot = calendar.weekSnapshot({ state: calendarState, weekStart: today.weekStart, todayIso: today.isoDate, days: window.WEEK_DAYS, content: window.DAY_CONTENT });
+    const { day, selectedDate, today, taskList, contentVersion } = activeContext;
+    const status = calendar.statusForDate({ state: calendarState, isoDate: selectedDate, todayIso: today.isoDate, dayId: day.id, taskList, contentVersion });
+    const snapshot = calendar.weekSnapshot({ state: calendarState, weekStart: today.weekStart, todayIso: today.isoDate, days: window.WEEK_DAYS, content: window.DAY_CONTENT, currentContentVersion: window.CONTENT_VERSION });
     activeContext.status = status;
     activeContext.snapshot = snapshot;
     const remaining = status.total - status.done;
@@ -312,10 +377,10 @@
     document.querySelector("#mission-status").textContent = status.label;
     document.querySelector(".mission-panel").classList.toggle("is-complete", status.id === "completed");
     document.querySelector(".checklist-section").classList.toggle("is-complete", status.id === "completed");
-    document.querySelectorAll("[data-check-index]").forEach((input) => {
+    document.querySelectorAll("[data-task-id]").forEach((input) => {
       const row = input.closest(".check-item");
       row.classList.toggle("is-done", input.checked);
-      row.querySelector("small").textContent = input.checked ? "Выполнено" : "";
+      row.querySelector(".check-item__action small").textContent = input.checked ? "Выполнено" : "";
     });
 
     const result = document.querySelector("#result-note");
@@ -332,8 +397,8 @@
 
   function handleCheck(event) {
     if (!activeContext.editable) return;
-    const index = Number(event.currentTarget.dataset.checkIndex);
-    calendarState = calendar.setTask(calendarState, activeContext.selectedDate, activeContext.day.id, index, event.currentTarget.checked);
+    const taskId = event.currentTarget.dataset.taskId;
+    calendarState = calendar.setTask(calendarState, activeContext.selectedDate, activeContext.day.id, taskId, event.currentTarget.checked, activeContext.contentVersion);
     writeCalendarState();
     updateLiveUi(true);
   }
@@ -351,9 +416,9 @@
   }
 
   function confirmReset() {
-    calendarState = calendar.resetDay(calendarState, activeContext.selectedDate, activeContext.day.id);
+    calendarState = calendar.resetDay(calendarState, activeContext.selectedDate, activeContext.day.id, activeContext.contentVersion);
     writeCalendarState();
-    document.querySelectorAll("[data-check-index]").forEach((input) => { input.checked = false; });
+    document.querySelectorAll("[data-task-id]").forEach((input) => { input.checked = false; });
     document.querySelector("#reset-confirm").hidden = true;
     updateLiveUi(false);
     document.querySelector("#reset-progress").focus();
@@ -366,29 +431,51 @@
     target.focus({ preventScroll: true });
   }
 
+  async function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.style.cssText = "position:fixed;opacity:0;pointer-events:none";
+    document.body.append(area);
+    area.select();
+    const copied = document.execCommand("copy");
+    area.remove();
+    if (!copied) throw new Error("copy failed");
+  }
+
+  async function copyTemplate(event) {
+    const button = event.currentTarget;
+    const text = activeContext.templates[Number(button.dataset.copyTemplate)];
+    try {
+      await copyText(text);
+      button.classList.add("is-success");
+      button.querySelector("span").textContent = "Шаблон скопирован";
+      showToast("Шаблон скопирован");
+      window.setTimeout(() => {
+        if (!button.isConnected) return;
+        button.classList.remove("is-success");
+        button.querySelector("span").textContent = "Скопировать шаблон";
+      }, 2200);
+    } catch (_) {
+      showToast("Не удалось скопировать — выделите шаблон вручную");
+    }
+  }
+
   async function copyMessage() {
     const text = activeContext.data.message;
     const button = document.querySelector("#copy-message");
     try {
-      if (navigator.clipboard && window.isSecureContext) {
-        await navigator.clipboard.writeText(text);
-      } else {
-        const area = document.createElement("textarea");
-        area.value = text;
-        area.style.cssText = "position:fixed;opacity:0;pointer-events:none";
-        document.body.append(area);
-        area.select();
-        const copied = document.execCommand("copy");
-        area.remove();
-        if (!copied) throw new Error("copy failed");
-      }
+      await copyText(text);
       button.classList.add("is-success");
       button.querySelector(".button-label").textContent = "Скопировано";
-      showToast("Текст скопирован");
+      showToast("Скопировано. Вставьте текст в чат команды.");
       window.setTimeout(() => {
         if (!button.isConnected) return;
         button.classList.remove("is-success");
-        button.querySelector(".button-label").textContent = "Скопировать текст";
+        button.querySelector(".button-label").textContent = "Скопировать сообщение";
       }, 2200);
     } catch (_) {
       showToast("Не удалось скопировать — выделите текст вручную");
