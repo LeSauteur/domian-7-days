@@ -120,28 +120,7 @@
       </div>`;
   }
 
-  function wednesdayArt() {
-    return `
-      <div class="mission-art mission-art--wednesday" role="img" aria-label="Этапы движения объекта и выделенная точка остановки">
-        <svg viewBox="0 0 220 150" aria-hidden="true">
-          <defs>
-            <linearGradient id="flow" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#52dcff"/><stop offset="1" stop-color="#0877c8"/></linearGradient>
-            <radialGradient id="stop"><stop stop-color="#ffd98d"/><stop offset=".6" stop-color="#ff9a46"/><stop offset="1" stop-color="#bd482d"/></radialGradient>
-            <filter id="cyanGlow"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
-          </defs>
-          <path class="mission-flow" d="M24 102 C52 46 91 126 117 70 S171 39 198 66"/>
-          <g class="mission-nodes" filter="url(#cyanGlow)">
-            <circle cx="24" cy="102" r="8"/><circle cx="66" cy="77" r="8"/><circle cx="108" cy="82" r="8"/><circle class="stop-node" cx="144" cy="48" r="16"/><circle cx="176" cy="48" r="8"/><circle cx="198" cy="66" r="8"/>
-          </g>
-          <path class="stop-mark" d="m137 41 14 14m0-14-14 14"/>
-          <path class="scan-line" d="M18 122h184"/>
-          <text x="18" y="140">ДВИЖЕНИЕ ОБЪЕКТА</text>
-        </svg>
-      </div>`;
-  }
-
   function missionArt(day) {
-    if (day.id === "wednesday") return wednesdayArt();
     return `<div class="mission-art mission-art--token" role="img" aria-label="Символ миссии: ${day.title}"><span></span>${icon(day.icon)}<small>${day.short}</small></div>`;
   }
 

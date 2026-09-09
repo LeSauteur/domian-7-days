@@ -331,13 +331,6 @@ h2 { margin-bottom: .75rem; font-size: clamp(1.65rem, 4vw, 2.5rem); letter-spaci
 .mission-art--token > span { position: absolute; width: 190px; height: 1px; z-index: -1; background: linear-gradient(90deg,transparent,rgba(72,217,255,.5),transparent); transform: rotate(18deg); }
 .mission-art--token .icon { width: 58px; height: 58px; color: var(--cyan); filter: drop-shadow(0 0 10px rgba(72,217,255,.46)); }
 .mission-art--token small { position: absolute; bottom: 17px; padding: .18rem .45rem; border-radius: 99px; background: #08283c; color: var(--cyan); font-size: .58rem; font-weight: 900; letter-spacing: .12em; }
-.mission-art--wednesday svg { overflow: visible; }
-.mission-art--wednesday .mission-flow { fill: none; stroke: url(#flow); stroke-width: 8; stroke-linecap: round; opacity: .72; filter: drop-shadow(0 0 7px rgba(44,201,255,.45)); }
-.mission-art--wednesday .mission-nodes circle { fill: #0b3852; stroke: #56ddff; stroke-width: 4; }
-.mission-art--wednesday .mission-nodes .stop-node { fill: url(#stop); stroke: #ffdba1; stroke-width: 3; }
-.mission-art--wednesday .stop-mark { fill: none; stroke: #40170c; stroke-width: 4; stroke-linecap: round; }
-.mission-art--wednesday .scan-line { fill: none; stroke: rgba(110,215,255,.28); stroke-width: 1; stroke-dasharray: 4 6; }
-.mission-art--wednesday text { fill: #75cde9; font: 800 9px Inter, sans-serif; letter-spacing: 2px; }
 .mission-panel.is-complete .mission-art { animation: mission-complete .55s ease both; }
 @keyframes mission-complete { 50% { transform: translateY(-4px) scale(1.025); filter: brightness(1.2); } }
 
@@ -453,7 +446,6 @@ h2 { margin-bottom: .75rem; font-size: clamp(1.65rem, 4vw, 2.5rem); letter-spaci
   .mission-art--token > span { width: 110px; }
   .mission-art--token .icon { width: 36px; height: 36px; }
   .mission-art--token small { bottom: 4px; }
-  .mission-art--wednesday { width: 140px; height: 104px; margin-right: -8px; }
   .mission-progress { grid-template-columns: 1fr auto; gap: .35rem .6rem; margin-top: .25rem; padding: .55rem .65rem; }
   .mission-progress > div:first-child span { font-size: .66rem; }
   .mission-progress strong { font-size: 1rem; }
@@ -502,7 +494,6 @@ h2 { margin-bottom: .75rem; font-size: clamp(1.65rem, 4vw, 2.5rem); letter-spaci
   .mission-panel { padding: .65rem; }
   .mission-main { grid-template-columns: minmax(0,1fr) 116px; }
   .mission-art { width: 96px; }
-  .mission-art--wednesday { width: 126px; }
   .week-calendar { padding: .45rem; }
   .week-legend { column-gap: .4rem; }
 }
@@ -683,4 +674,73 @@ body {
 @media (max-width: 370px) {
   .mission-art--token::after { width: 94px; height: 60px; }
   .mission-copy h1 { font-size: 1.9rem; }
+}
+
+/* Interaction semantics and real-device microtype */
+.mission-status {
+  min-height: 0;
+  gap: .4rem;
+  padding: .15rem .2rem;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  cursor: default;
+}
+.mission-status::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 9px currentColor;
+}
+.mission-status.state--in-progress,
+.mission-status.state--completed,
+.mission-status.state--incomplete { border-color: transparent; }
+
+.overview .day-section__heading > .icon {
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  cursor: default;
+}
+.principles article {
+  padding: .8rem .7rem;
+  border: 0;
+  border-left: 2px solid rgba(72,217,255,.2);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  cursor: default;
+}
+.principles .icon { width: 1.55rem; height: 1.55rem; opacity: .9; }
+.principles h3 { margin-top: .55rem; }
+.week-result__score {
+  border-color: rgba(72,217,255,.24);
+  background: rgba(4,20,31,.42);
+  box-shadow: none;
+  cursor: default;
+}
+.week-day:active { transform: scale(.97); }
+
+@media (max-width: 620px) {
+  .brand small { color: #a4bfcc; font-size: .62rem; }
+  .mission-meta { color: #aec8d5; font-size: .72rem; }
+  .mission-status { font-size: .63rem; }
+  .mission-copy .eyebrow { font-size: .68rem; }
+  .mission-progress > div:first-child span { color: #a9c2cf; font-size: .72rem; }
+  .mission-progress small { color: #9fb9c6; font-size: .66rem; }
+  .week-calendar__heading .eyebrow { font-size: .62rem; }
+  .week-day__today { font-size: .5rem; }
+  .week-day strong { font-size: .68rem; }
+  .week-day small { font-size: .58rem; }
+  .week-legend { color: #94adba; font-size: .63rem; line-height: 1.35; }
+  .checklist-heading .eyebrow { font-size: .66rem; }
+  .principles article { padding: .72rem .55rem; }
 }
