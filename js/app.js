@@ -237,6 +237,7 @@
 
   function renderDay(dayId) {
     activeContext = buildContext(dayId);
+    document.body.dataset.day = dayId;
     const { today, dayIndex, day, data, selectedDate, status, snapshot, editable, taskList, contentVersion, isLegacyContent } = activeContext;
     const checked = calendar.checkedTaskIds(calendarState, selectedDate, dayId, taskList, contentVersion);
     const previous = window.WEEK_DAYS[dayIndex - 1];
@@ -270,7 +271,7 @@
     }).join("");
 
     app.innerHTML = `
-      <section class="mission-panel page-enter ${isToday ? "is-today" : "is-viewing"} ${status.id === "completed" ? "is-complete" : ""}">
+      <section class="mission-panel day-theme--${day.id} page-enter ${isToday ? "is-today" : "is-viewing"} ${status.id === "completed" ? "is-complete" : ""}">
         ${backLink}
         <div class="mission-meta">
           <span>${temporalLabel} · ${capitalize(formatDate(selectedDate, true))}</span>
