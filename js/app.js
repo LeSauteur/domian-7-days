@@ -120,25 +120,8 @@
       </div>`;
   }
 
-  const ORB_CROPS = {
-    monday: [25, 40],
-    tuesday: [426, 40],
-    wednesday: [827, 40],
-    thursday: [1234, 40],
-    friday: [191, 430],
-    saturday: [622, 430],
-    sunday: [1058, 430],
-  };
-
   function missionArt(day) {
-    const [cropX, cropY] = ORB_CROPS[day.id];
-    return `
-      <div class="mission-art mission-art--orb" role="img" aria-label="Артефакт миссии: ${day.title}">
-        <svg viewBox="0 0 400 400" aria-hidden="true">
-          <image href="assets/images/domian-mission-orbs-v1.webp?v=1" x="-${cropX}" y="-${cropY}" width="1672" height="941" />
-        </svg>
-        <small>${day.short}</small>
-      </div>`;
+    return `<div class="mission-art mission-art--token" role="img" aria-label="Символ миссии: ${day.title}"><span></span>${icon(day.icon)}<small>${day.short}</small></div>`;
   }
 
   function detailMarkup(item) {
