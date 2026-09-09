@@ -293,6 +293,12 @@
         <div id="week-calendar" class="week-calendar">${weekStripMarkup(snapshot, selectedDate, today.isoDate)}</div>
       </section>
 
+      <section class="day-section overview" aria-labelledby="overview-title">
+        <div class="day-section__heading">${icon("target")}<div><span class="eyebrow">Контекст</span><h2 id="overview-title">Что это за день</h2><p>${data.intro}</p></div></div>
+        <div class="principles">${data.principles.map((principle) => `<article>${icon(principle.icon)}<h3>${principle.title}</h3><p>${principle.text}</p></article>`).join("")}</div>
+        <div class="scope-note"><strong>Объём работы</strong><p>${data.scope}</p></div>
+      </section>
+
       <section class="day-section checklist-section ${status.id === "completed" ? "is-complete" : ""}" aria-labelledby="checklist-title">
         <div class="day-section__heading checklist-heading">${icon("check")}<div><span class="eyebrow">Чек-лист руководителя</span><h2 id="checklist-title">Что проверить сегодня</h2><p>Отмечайте пункт, когда выполнено действие и проверен результат.</p></div></div>
         ${readOnlyNote}
@@ -312,7 +318,11 @@
           </div>` : ""}
       </section>
 
-      <div id="week-result-wrap">${weekResultMarkup(snapshot)}</div>
+
+      <section class="day-section tips-section" aria-labelledby="tips-title">
+        <div class="day-section__heading">${icon("spark")}<div><span class="eyebrow">На практике</span><h2 id="tips-title">Быстрые подсказки</h2></div></div>
+        <div class="tips-grid">${data.tips.map((tip) => `<article>${icon(tip.icon)}<div><h3>${tip.title}</h3><p>${tip.text}</p></div></article>`).join("")}</div>
+      </section>
 
       <section class="day-section message-section" aria-labelledby="message-title">
         <div class="day-section__heading">${icon("copy")}<div><span class="eyebrow">Готово к отправке</span><h2 id="message-title">Сообщение агентам</h2><p>Кнопка только копирует сообщение — приложение ничего не отправляет.</p></div></div>
@@ -320,21 +330,12 @@
         <button id="copy-message" class="button button--primary button--wide" type="button">${icon("copy")} <span class="button-label">Скопировать сообщение</span></button>
       </section>
 
-      <section class="day-section tips-section" aria-labelledby="tips-title">
-        <div class="day-section__heading">${icon("spark")}<div><span class="eyebrow">На практике</span><h2 id="tips-title">Быстрые подсказки</h2></div></div>
-        <div class="tips-grid">${data.tips.map((tip) => `<article>${icon(tip.icon)}<div><h3>${tip.title}</h3><p>${tip.text}</p></div></article>`).join("")}</div>
-      </section>
-
-      <section class="day-section overview" aria-labelledby="overview-title">
-        <div class="day-section__heading">${icon("target")}<div><span class="eyebrow">Контекст</span><h2 id="overview-title">Что это за день</h2><p>${data.intro}</p></div></div>
-        <div class="principles">${data.principles.map((principle) => `<article>${icon(principle.icon)}<h3>${principle.title}</h3><p>${principle.text}</p></article>`).join("")}</div>
-        <div class="scope-note"><strong>Объём работы</strong><p>${data.scope}</p></div>
-      </section>
-
       <section class="day-section details-section" aria-labelledby="details-title">
         <div class="day-section__heading">${icon("book")}<div><span class="eyebrow">Второй уровень</span><h2 id="details-title">Как сделать</h2><p>${data.help}</p></div></div>
         <div class="accordions">${data.details.map(detailMarkup).join("")}${detailMarkup(window.GENERAL_HELP)}${detailMarkup({ title: "Коротко о терминах", groups: window.TERM_DEFINITIONS })}</div>
       </section>
+
+      <div id="week-result-wrap">${weekResultMarkup(snapshot)}</div>
 
       <section class="day-section book-section" aria-labelledby="book-title">
         <div class="day-section__heading">${icon("book")}<div><span class="eyebrow">Первоисточник</span><h2 id="book-title">Книга 2.0</h2><p>Подробнее в книге: ${data.source}. Номер страницы указан и в подписи, если просмотрщик не поддерживает прямой переход.</p></div></div>
