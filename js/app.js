@@ -3,9 +3,11 @@
 
   const app = document.querySelector("#main");
   const toast = document.querySelector("#toast");
-  let activeDayId = "monday";
+  const calendar = window.DOMIAN_CALENDAR;
   let toastTimer;
-  let resetTimer;
+  let activeContext;
+  let calendarState;
+  let observedToday;
 
   const icons = {
     target: '<svg viewBox="0 0 24 24"><circle cx="11" cy="13" r="7"/><circle cx="11" cy="13" r="3"/><path d="m14 10 6-6m-3 0h3v3"/></svg>',
@@ -38,87 +40,106 @@
     toastTimer = window.setTimeout(() => toast.classList.remove("toast--visible"), 2200);
   }
 
-  function storageKey(dayId) {
-    return `domian:${dayId}:checklist:v1`;
+  function now() {
+    const supplied = window.DOMIAN_CLOCK?.now?.();
+    return supplied ? new Date(supplied) : new Date();
   }
 
-  function readChecks(dayId) {
+  function readCalendarState(todayIso) {
+    let parsed;
     try {
-      const saved = JSON.parse(localStorage.getItem(storageKey(dayId)));
-      return Array.isArray(saved) ? saved : [];
+      parsed = JSON.parse(localStorage.getItem(calendar.STORAGE_KEY));
     } catch (_) {
-      return [];
+      parsed = null;
     }
+    const normalized = calendar.normalizeState(parsed, todayIso);
+    try {
+      localStorage.setItem(calendar.STORAGE_KEY, JSON.stringify(normalized));
+    } catch (_) {
+      showToast("Прогресс сохранён только до закрытия страницы");
+    }
+    return normalized;
   }
 
-  function writeChecks(dayId, checks) {
+  function writeCalendarState() {
     try {
-      localStorage.setItem(storageKey(dayId), JSON.stringify(checks));
+      localStorage.setItem(calendar.STORAGE_KEY, JSON.stringify(calendarState));
     } catch (_) {
       showToast("Прогресс сохранён только до закрытия страницы");
     }
   }
 
-  function dayCard(day) {
-    const status = day.available ? "Открыть день" : "Следующий этап";
-    return `
-      <a class="day-card ${day.featured ? "day-card--active" : ""}" href="#day/${day.id}" aria-label="${day.name}: ${day.title}. ${status}">
-        <span class="day-card__top"><strong>${day.short}</strong><span class="status-dot" aria-hidden="true"></span></span>
-        ${icon(day.icon)}
-        <span class="day-card__title">${day.title}</span>
-        <small>${status}</small>
-      </a>`;
+  function formatDate(isoDate, withWeekday) {
+    return new Intl.DateTimeFormat("ru-RU", {
+      timeZone: "UTC",
+      day: "numeric",
+      month: "long",
+      ...(withWeekday ? { weekday: "long" } : {}),
+    }).format(new Date(`${isoDate}T12:00:00Z`));
   }
 
-  function renderHome() {
-    const monday = window.DAY_CONTENT.monday;
-    app.innerHTML = `
-      <section class="hero page-enter">
-        <div class="hero__copy">
-          <span class="eyebrow"><span></span> Практическая система недели</span>
-          <h1>7 дней<br><em>эффективной</em><br>работы</h1>
-          <p>Короткий ежедневный ритм для руководителя и команды: увидеть главное, выбрать действие и довести его до результата.</p>
-          <a class="button button--primary" href="#day/monday">Начать с понедельника <span aria-hidden="true">→</span></a>
-        </div>
-        <div class="hero__visual" aria-hidden="true">
-          <div class="orb"><span>7</span><small>дней</small></div>
-          <div class="orbit orbit--one"></div><div class="orbit orbit--two"></div>
-          <div class="float-card float-card--one">Ясный фокус</div>
-          <div class="float-card float-card--two">Следующий шаг</div>
-        </div>
-      </section>
+  function capitalize(text) {
+    return text.charAt(0).toUpperCase() + text.slice(1);
+  }
 
-      <section class="section" aria-labelledby="week-title">
-        <div class="section-heading">
-          <div><span class="eyebrow">Навигация</span><h2 id="week-title">Неделя в одном ритме</h2></div>
-          <p>Каждый день — один главный управленческий вопрос и измеримый финиш.</p>
-        </div>
-        <div class="days-grid">${window.WEEK_DAYS.map(dayCard).join("")}</div>
-      </section>
+  function statusSymbol(status) {
+    if (status.id === "completed") return "✓";
+    if (status.id === "incomplete") return "!";
+    if (status.id === "upcoming") return "◷";
+    if (status.id === "before-participation") return "—";
+    if (status.id === "in-progress") return String(status.done);
+    return "○";
+  }
 
-      <section class="section current-day" aria-labelledby="today-title">
-        <div class="current-day__header">
-          <div>${icon("target")}<div><span class="eyebrow">Старт недели</span><h2 id="today-title">Понедельник</h2><p>${monday.subtitle}</p></div></div>
-          <span class="pill">День 1</span>
-        </div>
-        <div class="preview-grid">
-          <article class="preview-card"><span>01</span><h3>Что это за день</h3><p>Наводим ясность в CRM и находим покупателей, которые готовы двигаться сейчас.</p></article>
-          <article class="preview-card"><span>02</span><h3>Что сделать</h3><ul><li>Выбрать приоритетных покупателей</li><li>Уточнить условия и барьеры</li><li>Назначить следующий шаг</li></ul></article>
-          <article class="preview-card"><span>03</span><h3>Текст для чата</h3><p>Готовое сообщение поможет синхронизировать команду без длинного совещания.</p></article>
-          <article class="preview-card preview-card--action"><span>04</span><h3>Рабочий интерфейс</h3><p>Чек-лист, прогресс, шаблон сообщения и материалы второго уровня.</p><a class="button button--primary" href="#day/monday">Открыть день <b aria-hidden="true">→</b></a></article>
-        </div>
-      </section>
+  function weekStripMarkup(snapshot, selectedDate, todayIso) {
+    const cells = snapshot.entries.map(({ day, isoDate, status }) => {
+      const isToday = isoDate === todayIso;
+      const isSelected = isoDate === selectedDate;
+      const aria = `${day.name}, ${formatDate(isoDate, false)}${isToday ? ", сегодня" : ""}, ${status.label.toLowerCase()}${status.id === "in-progress" ? `, ${status.done} из ${status.total}` : ""}`;
+      return `
+        <a class="week-day state--${status.id} ${isToday ? "is-today" : ""} ${isSelected ? "is-selected" : ""}"
+          href="#day/${day.id}" aria-label="${aria}" ${isToday ? 'aria-current="date"' : ""}
+          style="--day-progress:${status.percent}%">
+          <span class="week-day__today">${isToday ? "сегодня" : ""}</span>
+          <strong>${day.short}</strong>
+          <span class="week-day__status" aria-hidden="true">${statusSymbol(status)}</span>
+          <small>${Number(isoDate.slice(-2))}</small>
+        </a>`;
+    }).join("");
+    return `
+      <div class="week-calendar__heading">
+        <div><span class="eyebrow">Текущая неделя</span><strong>${formatDate(snapshot.weekStart, false)} — ${formatDate(snapshot.weekEnd, false)}</strong></div>
+        <span>${snapshot.completed}/7</span>
+      </div>
+      <nav class="week-strip" aria-label="Календарь рабочей недели">${cells}</nav>
+      <div class="week-legend" aria-label="Обозначения статусов">
+        <span><i>○</i> Не начато</span><span><i>◐</i> В работе</span><span><i>✓</i> Выполнено</span><span><i>!</i> Не завершено</span><span><i>◷</i> Предстоит</span><span><i>—</i> До участия</span>
+      </div>`;
+  }
 
-      <section class="section knowledge" aria-labelledby="knowledge-title">
-        <div class="knowledge__intro">${icon("book")}<div><span class="eyebrow">Preview</span><h2 id="knowledge-title">База знаний</h2><p>Материалы вне структуры недели появятся на следующем этапе.</p></div></div>
-        <div class="knowledge__items">
-          <div><b>Шаблоны</b><span>Документы и скрипты</span></div>
-          <div><b>Инструкции</b><span>Пошаговые гайды</span></div>
-          <div><b>Практики</b><span>Рабочие инструменты</span></div>
-          <div><b>Материалы</b><span>Дополнительное чтение</span></div>
-        </div>
-        <span class="preview-label">Будет добавлено</span>
-      </section>`;
+  function wednesdayArt() {
+    return `
+      <div class="mission-art mission-art--wednesday" role="img" aria-label="Этапы движения объекта и выделенная точка остановки">
+        <svg viewBox="0 0 220 150" aria-hidden="true">
+          <defs>
+            <linearGradient id="flow" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#52dcff"/><stop offset="1" stop-color="#0877c8"/></linearGradient>
+            <radialGradient id="stop"><stop stop-color="#ffd98d"/><stop offset=".6" stop-color="#ff9a46"/><stop offset="1" stop-color="#bd482d"/></radialGradient>
+            <filter id="cyanGlow"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+          </defs>
+          <path class="mission-flow" d="M24 102 C52 46 91 126 117 70 S171 39 198 66"/>
+          <g class="mission-nodes" filter="url(#cyanGlow)">
+            <circle cx="24" cy="102" r="8"/><circle cx="66" cy="77" r="8"/><circle cx="108" cy="82" r="8"/><circle class="stop-node" cx="144" cy="48" r="16"/><circle cx="176" cy="48" r="8"/><circle cx="198" cy="66" r="8"/>
+          </g>
+          <path class="stop-mark" d="m137 41 14 14m0-14-14 14"/>
+          <path class="scan-line" d="M18 122h184"/>
+          <text x="18" y="140">ДВИЖЕНИЕ ОБЪЕКТА</text>
+        </svg>
+      </div>`;
+  }
+
+  function missionArt(day) {
+    if (day.id === "wednesday") return wednesdayArt();
+    return `<div class="mission-art mission-art--token" role="img" aria-label="Символ миссии: ${day.title}"><span></span>${icon(day.icon)}<small>${day.short}</small></div>`;
   }
 
   function detailMarkup(item) {
@@ -129,46 +150,116 @@
     return `<details class="accordion"><summary><span>${item.title}</span><i aria-hidden="true"></i></summary><div class="accordion__body">${item.lead ? `<p>${item.lead}</p>` : ""}${items}${groups}</div></details>`;
   }
 
-  function renderDay(dayId) {
-    activeDayId = dayId;
-    const data = window.DAY_CONTENT[dayId];
+  function weekResultMarkup(snapshot) {
+    const nextFullWeek = formatDate(calendarState.firstFullWeekStart, false);
+    if (snapshot.outcome === "first-partial") {
+      return `
+        <section id="week-result" class="week-result week-result--partial" tabindex="-1">
+          <div class="week-result__score"><strong>${snapshot.completed}</strong><span>миссий<br>завершено</span></div>
+          <div><span class="eyebrow">Мягкий старт</span><h2>Первая неделя — знакомство с ритмом</h2><p>Предыдущие дни отмечены «До начала участия» и не считаются пропуском. Полный недельный результат начнётся ${nextFullWeek}.</p></div>
+        </section>`;
+    }
+    if (snapshot.outcome === "victory") {
+      return `
+        <section id="week-result" class="week-result week-result--victory" tabindex="-1">
+          <div class="week-result__score"><strong>7<span>/7</span></strong><i>✓</i></div>
+          <div><span class="eyebrow">Неделя завершена</span><h2>Недельная победа</h2><p>Все семь дневных миссий выполнены. Результат сохранён по календарным датам этой недели.</p></div>
+        </section>`;
+    }
+    if (snapshot.outcome === "finished") {
+      const missed = snapshot.entries.filter((entry) => entry.status.id !== "completed").map((entry) => entry.day.name.toLowerCase()).join(", ");
+      return `
+        <section id="week-result" class="week-result week-result--finished" tabindex="-1">
+          <div class="week-result__score"><strong>${snapshot.completed}<span>/7</span></strong></div>
+          <div><span class="eyebrow">Неделя завершена</span><h2>Фактический результат</h2><p>Завершено ${snapshot.completed} из 7. Не завершены: ${missed}. Новый цикл начнётся в понедельник — без обнуления истории.</p></div>
+        </section>`;
+    }
+    return `
+      <section id="week-result" class="week-result" tabindex="-1">
+        <div class="week-result__score"><strong>${snapshot.completed}<span>/7</span></strong></div>
+        <div><span class="eyebrow">Неделя в работе</span><h2>Каждый завершённый день остаётся в календаре</h2><p>Итог появится после завершения недели. Пропуск не блокирует следующие миссии.</p></div>
+      </section>`;
+  }
+
+  function buildContext(dayId) {
+    const today = calendar.datePartsInMoscow(now());
+    observedToday = today.isoDate;
+    calendarState = readCalendarState(today.isoDate);
     const dayIndex = window.WEEK_DAYS.findIndex((day) => day.id === dayId);
     const day = window.WEEK_DAYS[dayIndex];
+    const data = window.DAY_CONTENT[dayId];
+    const selectedDate = calendar.dateForDay(today.weekStart, dayIndex);
+    const status = calendar.statusForDate({
+      state: calendarState,
+      isoDate: selectedDate,
+      todayIso: today.isoDate,
+      dayId,
+      total: data.checklist.length,
+    });
+    const snapshot = calendar.weekSnapshot({ state: calendarState, weekStart: today.weekStart, todayIso: today.isoDate, days: window.WEEK_DAYS, content: window.DAY_CONTENT });
+    return { today, dayIndex, day, data, selectedDate, status, snapshot, editable: selectedDate === today.isoDate };
+  }
+
+  function renderDay(dayId) {
+    activeContext = buildContext(dayId);
+    const { today, dayIndex, day, data, selectedDate, status, snapshot, editable } = activeContext;
+    const checked = calendar.checkedIndexes(calendarState, selectedDate, dayId, data.checklist.length);
     const previous = window.WEEK_DAYS[dayIndex - 1];
     const next = window.WEEK_DAYS[dayIndex + 1];
-    const checked = readChecks(dayId).filter((index) => index >= 0 && index < data.checklist.length);
-    const finishHref = next ? `#day/${next.id}` : "#home";
-    const finishLabel = next ? `Перейти: ${next.name.toLowerCase()}` : "Вернуться к неделе";
-    const previousHref = previous ? `#day/${previous.id}` : "#home";
-    const previousLabel = previous ? "← Предыдущий день" : "← К неделе";
-    const nextHref = next ? `#day/${next.id}` : "#home";
-    const nextLabel = next ? "Следующий день" : "Завершить неделю";
+    const isToday = selectedDate === today.isoDate;
+    const temporalLabel = isToday ? "Сегодня" : selectedDate < today.isoDate ? "Прошедший день" : "Предстоящий день";
+    const backLink = isToday ? "" : '<a class="back-link back-link--compact" href="#home">← К сегодняшней миссии</a>';
+    const readOnlyNote = editable ? "" : `<div class="readonly-note">${icon("clock")}<span><strong>Режим просмотра.</strong> Отмечать задачи можно только в их календарный день.</span></div>`;
+
     app.innerHTML = `
-      <section class="day-hero page-enter">
-        <a class="back-link" href="#home">← К неделе</a>
-        <span class="eyebrow">${data.eyebrow}</span>
-        <div class="day-hero__title"><div><h1>${data.title}</h1><p>${data.subtitle}</p></div><span class="today-badge">День ${dayIndex + 1}</span></div>
+      <section class="mission-panel page-enter ${isToday ? "is-today" : "is-viewing"} ${status.id === "completed" ? "is-complete" : ""}">
+        ${backLink}
+        <div class="mission-meta">
+          <span>${temporalLabel} · ${capitalize(formatDate(selectedDate, true))}</span>
+          <span id="mission-status" class="mission-status state--${status.id}">${status.label}</span>
+        </div>
+        <div class="mission-main">
+          <div class="mission-copy">
+            <span class="eyebrow">${day.name} · ${day.title}</span>
+            <h1>${day.promise}</h1>
+            <p>${data.subtitle}</p>
+          </div>
+          ${missionArt(day)}
+        </div>
+        <div class="mission-progress">
+          <div><span>Прогресс миссии</span><strong id="progress-text">${status.done}/${status.total}</strong></div>
+          <div id="progress-track" class="progress-track" role="progressbar" aria-label="Прогресс миссии: ${day.name}" aria-valuemin="0" aria-valuemax="${status.total}" aria-valuenow="${status.done}"><span id="progress-bar" style="width:${status.percent}%"></span></div>
+          <small id="progress-label">${status.done === status.total ? "Миссия выполнена" : `Следующее действие · осталось ${status.total - status.done}`}</small>
+        </div>
+        <div id="week-calendar" class="week-calendar">${weekStripMarkup(snapshot, selectedDate, today.isoDate)}</div>
       </section>
 
-      <section class="day-section checklist-section" aria-labelledby="checklist-title">
-        <div class="day-section__heading checklist-heading">${icon("check")}<div><span class="eyebrow">Миссия дня</span><h2 id="checklist-title">Что нужно сделать сегодня</h2></div><div class="progress-count"><strong id="progress-text">0/${data.checklist.length}</strong><span id="progress-label">осталось ${data.checklist.length}</span></div></div>
-        <div id="progress-track" class="progress-track" role="progressbar" aria-label="Прогресс миссии: ${day.name}" aria-valuemin="0" aria-valuemax="${data.checklist.length}" aria-valuenow="0"><span id="progress-bar"></span></div>
+      <section class="day-section checklist-section ${status.id === "completed" ? "is-complete" : ""}" aria-labelledby="checklist-title">
+        <div class="day-section__heading checklist-heading">${icon("check")}<div><span class="eyebrow">Рабочие действия</span><h2 id="checklist-title">Что нужно сделать</h2></div></div>
+        ${readOnlyNote}
         <div class="checklist">${data.checklist.map((text, index) => `
-          <label class="check-item ${checked.includes(index) ? "is-done" : ""}">
-            <input type="checkbox" data-check-index="${index}" ${checked.includes(index) ? "checked" : ""} />
-            <span class="custom-check" aria-hidden="true"></span><span>${text}</span>
+          <label class="check-item ${checked.includes(index) ? "is-done" : ""} ${editable ? "" : "is-readonly"}">
+            <input type="checkbox" data-check-index="${index}" ${checked.includes(index) ? "checked" : ""} ${editable ? "" : "disabled"} />
+            <span class="custom-check" aria-hidden="true"></span><span>${text}</span><small>${checked.includes(index) ? "Выполнено" : ""}</small>
           </label>`).join("")}</div>
-        <div class="result-note"><span aria-hidden="true">✓</span><p>${data.result}</p></div>
-        <div id="completion-panel" class="completion-panel" hidden>
+        <div id="result-note" class="result-note ${status.id === "completed" ? "is-achieved" : ""}"><span aria-hidden="true">${status.id === "completed" ? "✓" : "→"}</span><div><strong>${status.id === "completed" ? "Результат достигнут" : "Ожидаемый результат"}</strong><p>${data.result}</p></div></div>
+        <div id="completion-panel" class="completion-panel" aria-live="polite" ${status.id === "completed" ? "" : "hidden"}>
           ${icon(day.icon)}
-          <div><span class="eyebrow">Миссия выполнена</span><h3>${data.title}: всё выполнено</h3><p>Все ${data.checklist.length} действий отмечены. Прогресс сохранён на этом устройстве.</p></div>
-          <a class="button button--primary" href="${finishHref}">${finishLabel} <span aria-hidden="true">→</span></a>
+          <div><span class="eyebrow">Миссия выполнена</span><h3>${data.title}: день завершён</h3><p>Все ${data.checklist.length} действий отмечены и сохранены за ${formatDate(selectedDate, false)}.</p></div>
+          <button class="button button--primary" type="button" data-scroll-week>К результату недели <span aria-hidden="true">↓</span></button>
         </div>
-        <button id="reset-progress" class="text-button" type="button">↻ Сбросить на новый день</button>
+        ${editable ? `
+          <button id="reset-progress" class="text-button" type="button">↻ Сбросить сегодняшний прогресс</button>
+          <div id="reset-confirm" class="reset-confirm" hidden role="group" aria-label="Подтверждение сброса">
+            <span>Сбросить только сегодняшние отметки?</span>
+            <button id="confirm-reset" type="button">Да, сбросить</button><button id="cancel-reset" type="button">Отмена</button>
+          </div>` : ""}
       </section>
+
+      <div id="week-result-wrap">${weekResultMarkup(snapshot)}</div>
 
       <section class="day-section message-section" aria-labelledby="message-title">
-        <div class="day-section__heading">${icon("copy")}<div><span class="eyebrow">Готово к отправке</span><h2 id="message-title">Текст для чата офиса</h2><p>Скопируйте и отправьте команде в рабочий чат.</p></div></div>
+        <div class="day-section__heading">${icon("copy")}<div><span class="eyebrow">Готово к отправке</span><h2 id="message-title">Текст для чата офиса</h2><p>Кнопка только копирует текст — приложение ничего не отправляет.</p></div></div>
         <div id="office-message" class="message-box">${data.message.replaceAll("\n", "<br>")}</div>
         <button id="copy-message" class="button button--primary button--wide" type="button">${icon("copy")} <span class="button-label">Скопировать текст</span></button>
       </section>
@@ -180,7 +271,7 @@
 
       <section class="day-section overview" aria-labelledby="overview-title">
         <div class="day-section__heading">${icon("target")}<div><span class="eyebrow">Контекст</span><h2 id="overview-title">Что это за день</h2><p>${data.intro}</p></div></div>
-        <div class="principles">${data.principles.map((p) => `<article>${icon(p.icon)}<h3>${p.title}</h3><p>${p.text}</p></article>`).join("")}</div>
+        <div class="principles">${data.principles.map((principle) => `<article>${icon(principle.icon)}<h3>${principle.title}</h3><p>${principle.text}</p></article>`).join("")}</div>
       </section>
 
       <section class="day-section details-section" aria-labelledby="details-title">
@@ -189,71 +280,94 @@
       </section>
 
       <nav class="day-navigation" aria-label="Навигация по дням">
-        <a class="button button--secondary" href="${previousHref}">${previousLabel}</a>
-        <a class="button button--primary" href="${nextHref}">${nextLabel} <span aria-hidden="true">→</span></a>
+        <a class="button button--secondary" href="${previous ? `#day/${previous.id}` : "#home"}">${previous ? "← Предыдущий день" : "← Сегодня"}</a>
+        <a class="button button--primary" href="${next ? `#day/${next.id}` : "#home"}">${next ? "Следующий день" : "К сегодняшней миссии"} <span aria-hidden="true">→</span></a>
       </nav>`;
 
-    updateProgress();
-    document.querySelectorAll("[data-check-index]").forEach((input) => input.addEventListener("change", handleCheck));
-    document.querySelector("#reset-progress").addEventListener("click", resetProgress);
-    document.querySelector("#copy-message").addEventListener("click", copyMessage);
+    bindDayEvents();
   }
 
-  function updateProgress() {
-    const inputs = [...document.querySelectorAll("[data-check-index]")];
-    if (!inputs.length) return;
-    const done = inputs.filter((input) => input.checked).length;
-    const total = inputs.length;
-    const remaining = total - done;
-    document.querySelector("#progress-text").textContent = `${done}/${inputs.length}`;
-    document.querySelector("#progress-label").textContent = remaining === 0 ? "день завершён" : `осталось ${remaining}`;
-    document.querySelector("#progress-bar").style.width = `${(done / inputs.length) * 100}%`;
-    document.querySelector("#progress-track").setAttribute("aria-valuenow", String(done));
-    inputs.forEach((input) => input.closest(".check-item").classList.toggle("is-done", input.checked));
-    document.querySelector(".checklist-section").classList.toggle("is-complete", remaining === 0);
-    document.querySelector("#completion-panel").hidden = remaining !== 0;
+  function bindDayEvents() {
+    document.querySelectorAll("[data-check-index]:not(:disabled)").forEach((input) => input.addEventListener("change", handleCheck));
+    document.querySelector("#copy-message")?.addEventListener("click", copyMessage);
+    document.querySelector("#reset-progress")?.addEventListener("click", openResetConfirmation);
+    document.querySelector("#confirm-reset")?.addEventListener("click", confirmReset);
+    document.querySelector("#cancel-reset")?.addEventListener("click", cancelReset);
+    document.querySelector("[data-scroll-week]")?.addEventListener("click", scrollToWeekResult);
   }
 
-  function handleCheck() {
-    const checked = [...document.querySelectorAll("[data-check-index]:checked")].map((input) => Number(input.dataset.checkIndex));
-    writeChecks(activeDayId, checked);
-    updateProgress();
-    if (checked.length === window.DAY_CONTENT[activeDayId].checklist.length) showToast("Миссия дня выполнена");
+  function updateLiveUi(announceCompletion) {
+    const { day, data, selectedDate, today } = activeContext;
+    const status = calendar.statusForDate({ state: calendarState, isoDate: selectedDate, todayIso: today.isoDate, dayId: day.id, total: data.checklist.length });
+    const snapshot = calendar.weekSnapshot({ state: calendarState, weekStart: today.weekStart, todayIso: today.isoDate, days: window.WEEK_DAYS, content: window.DAY_CONTENT });
+    activeContext.status = status;
+    activeContext.snapshot = snapshot;
+    const remaining = status.total - status.done;
+
+    document.querySelector("#progress-text").textContent = `${status.done}/${status.total}`;
+    document.querySelector("#progress-label").textContent = remaining === 0 ? "Миссия выполнена" : `Следующее действие · осталось ${remaining}`;
+    document.querySelector("#progress-bar").style.width = `${status.percent}%`;
+    document.querySelector("#progress-track").setAttribute("aria-valuenow", String(status.done));
+    document.querySelector("#mission-status").className = `mission-status state--${status.id}`;
+    document.querySelector("#mission-status").textContent = status.label;
+    document.querySelector(".mission-panel").classList.toggle("is-complete", status.id === "completed");
+    document.querySelector(".checklist-section").classList.toggle("is-complete", status.id === "completed");
+    document.querySelectorAll("[data-check-index]").forEach((input) => {
+      const row = input.closest(".check-item");
+      row.classList.toggle("is-done", input.checked);
+      row.querySelector("small").textContent = input.checked ? "Выполнено" : "";
+    });
+
+    const result = document.querySelector("#result-note");
+    result.classList.toggle("is-achieved", status.id === "completed");
+    result.querySelector(":scope > span").textContent = status.id === "completed" ? "✓" : "→";
+    result.querySelector("strong").textContent = status.id === "completed" ? "Результат достигнут" : "Ожидаемый результат";
+    document.querySelector("#completion-panel").hidden = status.id !== "completed";
+    document.querySelector("#week-calendar").innerHTML = weekStripMarkup(snapshot, selectedDate, today.isoDate);
+    document.querySelector("#week-result-wrap").innerHTML = weekResultMarkup(snapshot);
+    document.querySelector("[data-scroll-week]")?.addEventListener("click", scrollToWeekResult);
+
+    if (announceCompletion && status.id === "completed") showToast("Миссия дня выполнена");
   }
 
-  function resetProgress() {
-    const button = document.querySelector("#reset-progress");
-    const hasProgress = document.querySelectorAll("[data-check-index]:checked").length > 0;
-    if (!hasProgress) {
-      showToast("Прогресс уже пуст");
-      return;
-    }
-    if (button.dataset.armed !== "true") {
-      button.dataset.armed = "true";
-      button.classList.add("is-armed");
-      button.textContent = "Ещё раз — сбросить прогресс";
-      showToast("Подтвердите сброс повторным нажатием");
-      window.clearTimeout(resetTimer);
-      resetTimer = window.setTimeout(() => {
-        if (!button.isConnected) return;
-        button.dataset.armed = "false";
-        button.classList.remove("is-armed");
-        button.textContent = "↻ Сбросить на новый день";
-      }, 3200);
-      return;
-    }
-    window.clearTimeout(resetTimer);
+  function handleCheck(event) {
+    if (!activeContext.editable) return;
+    const index = Number(event.currentTarget.dataset.checkIndex);
+    calendarState = calendar.setTask(calendarState, activeContext.selectedDate, activeContext.day.id, index, event.currentTarget.checked);
+    writeCalendarState();
+    updateLiveUi(true);
+  }
+
+  function openResetConfirmation() {
+    const confirm = document.querySelector("#reset-confirm");
+    confirm.hidden = false;
+    document.querySelector("#confirm-reset").focus();
+  }
+
+  function cancelReset() {
+    document.querySelector("#reset-confirm").hidden = true;
+    document.querySelector("#reset-progress").focus();
+    showToast("Сброс отменён");
+  }
+
+  function confirmReset() {
+    calendarState = calendar.resetDay(calendarState, activeContext.selectedDate, activeContext.day.id);
+    writeCalendarState();
     document.querySelectorAll("[data-check-index]").forEach((input) => { input.checked = false; });
-    writeChecks(activeDayId, []);
-    updateProgress();
-    button.dataset.armed = "false";
-    button.classList.remove("is-armed");
-    button.textContent = "↻ Сбросить на новый день";
-    showToast("Прогресс сброшен");
+    document.querySelector("#reset-confirm").hidden = true;
+    updateLiveUi(false);
+    document.querySelector("#reset-progress").focus();
+    showToast("Сегодняшний прогресс сброшен");
+  }
+
+  function scrollToWeekResult() {
+    const target = document.querySelector("#week-result");
+    target.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "center" });
+    target.focus({ preventScroll: true });
   }
 
   async function copyMessage() {
-    const text = window.DAY_CONTENT[activeDayId].message;
+    const text = activeContext.data.message;
     const button = document.querySelector("#copy-message");
     try {
       if (navigator.clipboard && window.isSecureContext) {
@@ -282,15 +396,25 @@
   }
 
   function route() {
+    const today = calendar.datePartsInMoscow(now());
     const hash = location.hash || "#home";
-    if (hash === "#home" || hash === "#") renderHome();
-    else if (hash.startsWith("#day/")) {
-      const id = hash.replace("#day/", "").split("?")[0];
-      window.DAY_CONTENT[id] ? renderDay(id) : renderHome();
-    } else renderHome();
+    let dayId = window.WEEK_DAYS[today.dayIndex].id;
+    if (hash.startsWith("#day/")) {
+      const requested = hash.replace("#day/", "").split("?")[0];
+      if (window.DAY_CONTENT[requested]) dayId = requested;
+    }
+    renderDay(dayId);
     window.scrollTo({ top: 0, behavior: "instant" });
   }
 
+  function checkDateRollover() {
+    const current = calendar.datePartsInMoscow(now()).isoDate;
+    if (observedToday && current !== observedToday) route();
+  }
+
   window.addEventListener("hashchange", route);
+  window.addEventListener("focus", checkDateRollover);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) checkDateRollover(); });
+  window.setInterval(checkDateRollover, 60000);
   route();
 })();
