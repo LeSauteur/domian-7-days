@@ -4,10 +4,12 @@
   const app = document.querySelector("#main");
   const toast = document.querySelector("#toast");
   const calendar = window.DOMIAN_CALENDAR;
+  const leaderTools = window.DOMIAN_LEADER_TOOLS;
   let toastTimer;
   let activeContext;
   let calendarState;
   let observedToday;
+  let lastDayId;
 
   const icons = {
     target: '<svg viewBox="0 0 24 24"><circle cx="11" cy="13" r="7"/><circle cx="11" cy="13" r="3"/><path d="m14 10 6-6m-3 0h3v3"/></svg>',
@@ -216,6 +218,8 @@
 
   function renderDay(dayId) {
     activeContext = buildContext(dayId);
+    lastDayId = dayId;
+    document.body.dataset.view = "day";
     document.body.dataset.day = dayId;
     const { today, dayIndex, day, data, selectedDate, status, snapshot, editable, taskList, contentVersion, isLegacyContent } = activeContext;
     const checked = calendar.checkedTaskIds(calendarState, selectedDate, dayId, taskList, contentVersion);
@@ -270,6 +274,7 @@
           <small id="progress-label">${status.done === status.total ? "Миссия выполнена" : `Следующее действие · осталось ${status.total - status.done}`}</small>
         </div>
         <div id="week-calendar" class="week-calendar">${weekStripMarkup(snapshot, selectedDate, today.isoDate)}</div>
+        <a class="tools-shortcut" href="#tools">${icon("book")}<span>Инструменты руководителя</span><span aria-hidden="true">→</span></a>
       </section>
 
       <section class="day-section overview" aria-labelledby="overview-title">
@@ -315,6 +320,7 @@
       </section>
 
       <div id="week-result-wrap">${weekResultMarkup(snapshot)}</div>
+      ${leaderTools.reflectionMarkup(today.weekStart)}
 
       <section class="day-section book-section" aria-labelledby="book-title">
         <div class="day-section__heading">${icon("book")}<div><span class="eyebrow">Первоисточник</span><h2 id="book-title">Книга 2.0</h2><p>Подробнее в книге: ${data.source}. Номер страницы указан и в подписи, если просмотрщик не поддерживает прямой переход.</p></div></div>
@@ -330,6 +336,7 @@
       </nav>`;
 
     bindDayEvents();
+    leaderTools.bindReflection(app);
   }
 
   function bindDayEvents() {
@@ -466,6 +473,14 @@
   function route() {
     const today = calendar.datePartsInMoscow(now());
     const hash = location.hash || "#home";
+    if (hash === "#tools" || hash.startsWith("#tools/")) {
+      observedToday = today.isoDate;
+      activeContext = null;
+      document.body.dataset.view = "tools";
+      window.scrollTo({ top: 0, behavior: "instant" });
+      leaderTools.render({ app, icon, backHref: lastDayId ? `#day/${lastDayId}` : "#home", weekStart: today.weekStart, focusId: hash.split("/")[1] });
+      return;
+    }
     let dayId = window.WEEK_DAYS[today.dayIndex].id;
     if (hash.startsWith("#day/")) {
       const requested = hash.replace("#day/", "").split("?")[0];
