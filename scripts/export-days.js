@@ -24,7 +24,7 @@ if (require.main === module) {
   const target = path.join(__dirname, "../data/days.json");
   const expected = JSON.stringify(exportDays(), null, 2) + "\n";
   if (process.argv.includes("--check")) {
-    if (fs.readFileSync(target, "utf8") !== expected) {
+    if (fs.readFileSync(target, "utf8").replace(/\r\n/g, "\n") !== expected) {
       throw new Error("data/days.json устарел. Выполните node scripts/export-days.js");
     }
     console.log("days.json соответствует days.js");
